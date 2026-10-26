@@ -1,0 +1,146 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserRole() {
+      return request.auth.token.role != null ? request.auth.token.role : 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && getUserRole() == 'admin';
+    }
+    
+    function isClaimsOfficer() {
+      return isAuthenticated() && (getUserRole() == 'claims_officer' || isAdmin());
+    }
+    
+    function isUniversityRep() {
+      return isAuthenticated() && getUserRole() == 'university';
+    }
+
+    // Users Collection: Users can read their own profile, admins can read all
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin() || isClaimsOfficer());
+      // Users cannot change their own role or promote themselves
+      allow create: if isAuthenticated() && request.resource.data.role in ['parent', 'student'];
+      allow update: if isAuthenticated() && (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'kycStatus'])) || isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Students Collection
+    match /students/{studentId} {
+      allow read: if isAuthenticated() && (
+        resource.data.guardianId == request.auth.uid || 
+        resource.data.studentEnrollmentId == request.auth.token.enrollmentId ||
+        isClaimsOfficer() || 
+        isUniversityRep() || 
+        isAdmin()
+      );
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && (resource.data.guardianId == request.auth.uid || isAdmin());
+    }
+    
+    // Universities Collection: Publicly readable for quote generation
+    match /universities/{universityId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Insurance Plans: Readable by all, manageable only by Admins
+    match /insurancePlans/{planId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Quotes Collection: Owned by guardian
+    match /quotes/{quoteId} {
+      allow read: if isAuthenticated() && (resource.data.guardianId == request.auth.uid || isAdmin() || isClaimsOfficer());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && resource.data.guardianId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+    
+    // Education Policies: PolicyCenter contracts
+    match /educationPolicies/{policyId} {
+      allow read: if isAuthenticated() && (
+        resource.data.guardianId == request.auth.uid || 
+        resource.data.studentId == request.auth.uid ||
+        isClaimsOfficer() || 
+        isAdmin()
+      );
+      // Policies are issued via verified payment transactions
+      allow create, update: if isAuthenticated() && (isClaimsOfficer() || isAdmin());
+      allow delete: if isAdmin();
+    }
+    
+    // Invoices and Payments: BillingCenter
+    match /premiumInvoices/{invoiceId} {
+      allow read: if isAuthenticated() && (resource.data.guardianId == request.auth.uid || isAdmin() || isClaimsOfficer());
+      allow write: if isAdmin() || isClaimsOfficer();
+    }
+    
+    match /premiumPayments/{paymentId} {
+      allow read: if isAuthenticated() && (resource.data.guardianId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.guardianId == request.auth.uid;
+      allow update, delete: if false; // Immutable audit record
+    }
+    
+    // Claims: ClaimCenter workflows
+    match /educationClaims/{claimId} {
+      allow read: if isAuthenticated() && (
+        resource.data.guardianId == request.auth.uid || 
+        resource.data.studentId == request.auth.uid ||
+        isClaimsOfficer() || 
+        isUniversityRep() || 
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && request.resource.data.guardianId == request.auth.uid;
+      // Adjudication, status changes, and approvals restricted to claims officers and admins
+      allow update: if isAuthenticated() && (
+        (resource.data.guardianId == request.auth.uid && resource.data.status == 'draft') ||
+        isClaimsOfficer() || 
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+    
+    // Claim Documents: Restricted to authorized claimant and adjudicators
+    match /claimDocuments/{docId} {
+      allow read: if isAuthenticated() && (
+        resource.data.uploadedBy == request.auth.uid || 
+        isClaimsOfficer() || 
+        isAdmin()
+      );
+      allow create: if isAuthenticated();
+      allow update: if isClaimsOfficer() || isAdmin();
+      allow delete: if isClaimsOfficer() || isAdmin();
+    }
+    
+    // University Verifications: Bursar & Registrar access
+    match /universityVerifications/{verifId} {
+      allow read: if isAuthenticated() && (isUniversityRep() || isClaimsOfficer() || isAdmin());
+      allow create, update: if isUniversityRep() || isClaimsOfficer() || isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Audit Logs: Append-only by system, read-only by Admin
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+    
+    // Notifications
+    match /notifications/{notifId} {
+      allow read, update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+  }
+}

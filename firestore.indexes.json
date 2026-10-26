@@ -1,0 +1,21 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "educationClaims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "educationPolicies",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "guardianId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

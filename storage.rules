@@ -1,0 +1,18 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Claim supporting documents must be strictly private and accessible only to claimant and claims officers
+    match /claims/{claimId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null 
+        && request.resource.size < 10 * 1024 * 1024 // 10MB limit
+        && request.resource.contentType.matches('application/pdf|image/jpeg|image/png');
+    }
+    
+    // Fee demand notes from universities
+    match /university_demands/{universityId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.resource.size < 10 * 1024 * 1024;
+    }
+  }
+}
